@@ -1,0 +1,9 @@
+#lb_defaults
+config/
+env/
+log/
+temp_today/
+.vscode/
+output/
+project-defualts.sh
+.DS_Store

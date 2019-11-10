@@ -19,11 +19,20 @@
 # limitations under the License.
 #
 
-import socket
 import argparse
-from struct import pack
+import json
+import os
+import socket
+import sys
 
-version = 0.2
+from struct import pack
+from os import path
+
+os.chdir("/Users/branclx1/GitHub/forked/tplink-smartplug")
+sys.path.append(path.abspath('../../../GitLab/personal/utils'))
+from common import misc
+
+version = 0.3
 
 # Check if hostname is valid
 def validHostname(hostname):
@@ -35,6 +44,7 @@ def validHostname(hostname):
 
 # Predefined Smart Plug Commands
 # For a full list of commands, consult tplink_commands.txt
+# {"system":{"get_sysinfo":{}},"emeter":{"get_realtime":{}},"time":{"get_time":{}}}
 commands = {'info'     : '{"system":{"get_sysinfo":{}}}',
 			'on'       : '{"system":{"set_relay_state":{"state":1}}}',
 			'off'      : '{"system":{"set_relay_state":{"state":0}}}',
@@ -48,26 +58,23 @@ commands = {'info'     : '{"system":{"get_sysinfo":{}}}',
 			'reset'    : '{"system":{"reset":{"delay":1}}}',
 			'energy'   : '{"emeter":{"get_realtime":{}}}'
 }
-
-# Encryption and Decryption of TP-Link Smart Home Protocol
-# XOR Autokey Cipher with starting key = 171
 def encrypt(string):
 	key = 171
-	result = pack('>I', len(string))
-	for i in string:
-		a = key ^ ord(i)
+	result = b"\0\0\0" + bytes([len(string)])
+	for i in string.encode('latin-1'):
+		a = key ^ i
 		key = a
-		result += chr(a)
+		result += bytes([a])
 	return result
-
+	
 def decrypt(string):
 	key = 171
-	result = ""
+	result = b""
 	for i in string:
-		a = key ^ ord(i)
-		key = ord(i)
-		result += chr(a)
-	return result
+		a = key ^ i
+		key = i
+		result += bytes([a])
+	return result.decode('latin-1')
 
 # Parse commandline arguments
 parser = argparse.ArgumentParser(description="TP-Link Wi-Fi Smart Plug Client v" + str(version))
@@ -77,16 +84,18 @@ group.add_argument("-c", "--command", metavar="<command>", help="Preset command 
 group.add_argument("-j", "--json", metavar="<JSON string>", help="Full JSON string of command to send")
 args = parser.parse_args()
 
-
+logger = misc.my_logger(('./log/tplink-smartplug_{}.log').format(misc.get_dt(fmt='yyyymmdd')))
+logger.info({"action":"start"})
 # Set target IP, port and command to send
 ip = args.target
 port = 9999
+
+logger.info({"ip":ip,"port":port,"command":str(args.command)})
+
 if args.command is None:
 	cmd = args.json
 else:
 	cmd = commands[args.command]
-
-
 
 # Send command and receive reply
 try:
@@ -96,8 +105,22 @@ try:
 	data = sock_tcp.recv(2048)
 	sock_tcp.close()
 
-	print "Sent:     ", cmd
-	print "Received: ", decrypt(data[4:])
+	output = json.loads(decrypt(data[4:]))
+	output = {
+		"device":{
+			"ip": ip
+		},
+		"meta":{
+			"date":misc.get_dt(fmt='yyyymmddHHMM')
+		},
+		"data":output
+	}
+	output_path = './output/' + str(args.command) + '/' + str(misc.get_dt(fmt='yyyymmdd')) + '/'
+	misc.file_write(fname= output_path + str(ip).replace('.','_') + '_' + misc.get_dt(fmt='yyyymmddHHMMSS') + '.json',fformat='json',data=output,pprint=True)
+	logger.info({"action":"end"})
 except socket.error:
-	quit("Cound not connect to host " + ip + ":" + str(port))
+	message = {"message":"Cound not connect to host " + ip + ":" + str(port)}
+	logger.error(message)
+	print(message)
+	sys.exit(1)
 
